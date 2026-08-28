@@ -1,0 +1,7 @@
+_base_: ../default.yaml
+stage: baseline
+baseline: {name: cnndetection, pretrained: true}
+# Wang et al.'s recipe IS the augmentation policy: blur + JPEG at p=0.5
+augment: {enabled: true, jpeg_prob: 0.5, blur_prob: 0.5, resize_prob: 0.0, color_jitter: 0.0}
+loss: {supcon_weight: 0.0, band_entropy_weight: 0.0}
+train: {epochs: 10, batch_size: 64, lr_backbone: 1.0e-4, lr_new: 1.0e-3, ckpt_dir: runs/base_cnndetection}

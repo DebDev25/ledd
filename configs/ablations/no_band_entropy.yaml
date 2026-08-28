@@ -1,0 +1,3 @@
+_base_: ../stage3_joint.yaml
+loss: {band_entropy_weight: 0.0}
+train: {ckpt_dir: runs/abl_no_band_entropy}

@@ -1,0 +1,12 @@
+_base_: default.yaml
+stage: joint
+init:
+  spatial_ckpt: runs/stage1_spatial/best.pth
+  frequency_ckpt: runs/stage2_frequency/best.pth
+  freeze_streams: false     # ablation: true
+train:
+  epochs: 10
+  batch_size: 96
+  lr_backbone: 1.0e-5       # streams 10x down
+  lr_new: 1.0e-3
+  ckpt_dir: runs/stage3_joint

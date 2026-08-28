@@ -1,0 +1,4 @@
+_base_: ../stage3_joint.yaml
+model:
+  fusion: {modality_dropout: 0.0}
+train: {ckpt_dir: runs/abl_no_moddrop}

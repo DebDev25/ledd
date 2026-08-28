@@ -1,0 +1,83 @@
+# Base config. Stage configs inherit from this via `_base_: default.yaml`.
+seed: 42
+device: cuda          # falls back to cpu automatically
+amp: true
+
+data:
+  root: data/genimage_224          # preprocessed crop archive
+  ood_root: data/ood               # SDXL / SD3 / Flux + reals
+  image_size: 224
+  num_workers: 4
+  # Generator split (see Architecture doc S7.1)
+  train_generators: [sd_v14, sd_v15, wukong, vqdm, biggan, midjourney]
+  val_generator: adm               # checkpoint selection + tuning
+  test_generators: [glide]         # untouched until final eval
+  per_generator_per_class: 10000   # 10k fake + 10k real per generator
+
+augment:
+  enabled: true
+  hflip: 0.5
+  jpeg_prob: 0.5
+  jpeg_quality: [50, 95]
+  blur_prob: 0.3
+  blur_sigma: [0.5, 2.0]
+  resize_prob: 0.3
+  resize_scale: [0.5, 0.9]
+  color_jitter: 0.1
+
+model:
+  spatial:
+    name: mobilevit_s
+    pretrained: true
+    token_stage: 3                 # stride-16 -> 14x14 = 196 tokens
+    use_npr_channel: false         # optional ablation
+  frequency:
+    n_bands: 12                    # equal-area rings
+    drop_lowest: 1                 # zero DC + lowest ring
+    representation: magnitude      # magnitude | magnitude_phase | dct
+    embed_dim: 160
+    depth: 2
+    heads: 4
+    use_radial_mlp: true
+  fusion:
+    mode: cross_attention          # cross_attention | concat  (ablation)
+    dim: 192
+    heads: 4
+    layers: 1
+    bidirectional: true
+    modality_dropout: 0.25
+  head:
+    hidden: 192
+    dropout: 0.1
+  projection:                       # SupCon head, discarded at inference
+    dim: 128
+    hidden: 192
+
+loss:
+  bce_weight: 1.0
+  supcon_weight: 0.5
+  band_entropy_weight: 0.05
+  supcon:
+    temperature: 0.1
+    queue_size: 8192
+    warmup_steps: 500              # fill queue before activating loss
+    ramp_steps: 1000               # linear ramp of lambda_con
+  band_entropy:
+    normalize: true                # divide by log(n_bands)
+
+train:
+  epochs: 10
+  batch_size: 96
+  lr_backbone: 1.0e-5
+  lr_new: 1.0e-3
+  weight_decay: 0.05
+  warmup_epochs: 2
+  grad_clip: 1.0
+  log_interval: 50
+  ckpt_dir: runs/default
+  resume: auto                     # auto | none | <path>
+  select_metric: val_generator_auc  # NEVER in-distribution auc
+
+eval:
+  batch_size: 128
+  degradations: [none, jpeg_50, jpeg_75, blur_2, resize_0.5]

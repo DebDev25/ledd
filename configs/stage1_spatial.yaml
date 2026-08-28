@@ -1,0 +1,13 @@
+_base_: default.yaml
+stage: spatial
+model:
+  spatial: {pretrained: true}
+loss:
+  supcon_weight: 0.0        # Stage 1 is plain BCE (keeps ablation rows clean)
+  band_entropy_weight: 0.0
+train:
+  epochs: 12
+  batch_size: 96
+  lr_backbone: 1.0e-4       # not yet dropped 10x
+  lr_new: 1.0e-3
+  ckpt_dir: runs/stage1_spatial

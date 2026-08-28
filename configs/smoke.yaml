@@ -1,0 +1,22 @@
+# Tiny config for the dummy-data pipeline run. Not a scientific configuration.
+_base_: default.yaml
+stage: joint
+data:
+  root: data/dummy_224
+  num_workers: 2
+  train_generators: [gen_a, gen_b, gen_c, gen_d, gen_e, gen_f]
+  val_generator: gen_val
+  test_generators: [gen_test]
+loss:
+  supcon:
+    queue_size: 512
+    warmup_steps: 5
+    ramp_steps: 10
+train:
+  epochs: 2
+  batch_size: 16
+  warmup_epochs: 0
+  ckpt_dir: runs/smoke
+eval:
+  batch_size: 16
+  degradations: [none, jpeg_50]
