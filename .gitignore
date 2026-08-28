@@ -1,7 +1,14 @@
+# NOTE: these patterns are ROOT-ANCHORED with a leading slash on purpose.
+# A bare "data/" also matches ledd/data/, which silently excludes the data module
+# from the repo and produces "No module named 'ledd.data'" on a fresh clone.
 __pycache__/
 *.pyc
-runs/
-data/
+/data/
+/runs/
+/third_party/
 *.pth
 *.ckpt
 .ipynb_checkpoints/
+.pytest_cache/
+kaggle.json
+.env
