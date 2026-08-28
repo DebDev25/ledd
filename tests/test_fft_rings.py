@@ -69,10 +69,23 @@ def test_all_representations_build(rep, ch):
 
 
 def test_spectrum_differs_between_smooth_and_noisy_images():
-    """Sanity: the stream must actually see something discriminative."""
+    """Sanity: the stream must see something discriminative.
+
+    Compare the per-band PROFILE, never the spectrum's mean: the spectrum is
+    standardised per image (zero mean, unit std) by design, so its mean is ~0 for
+    every input and comparing means compares two zeros. That standardisation is
+    deliberate -- it makes the frequency stream invariant to exposure and contrast.
+    """
+    torch.manual_seed(0)
     smooth = torch.ones(1, 3, 64, 64) * 0.5
     smooth += torch.linspace(0, 0.1, 64).view(1, 1, 1, -1)
     noisy = torch.rand(1, 3, 64, 64)
-    ms = build_spectrum(smooth).mean()
-    mn = build_spectrum(noisy).mean()
-    assert not torch.isclose(ms, mn, atol=1e-3)
+
+    masks = equal_area_ring_masks(64, 64, 8, drop_lowest=0)
+    prof_s = band_pool(build_spectrum(smooth), masks, n_stats=1)[0, :, 0]
+    prof_n = band_pool(build_spectrum(noisy), masks, n_stats=1)[0, :, 0]
+
+    # a smooth image concentrates relatively more energy in the lowest ring
+    assert (prof_s[0] - prof_n[0]).item() > 0.05
+    # and the profiles differ overall (measured range across seeds: 0.17-0.33)
+    assert torch.linalg.norm(prof_s - prof_n).item() > 0.10
