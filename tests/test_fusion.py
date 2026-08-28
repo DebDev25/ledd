@@ -52,8 +52,27 @@ def test_modality_dropout_only_in_training():
 
 
 def test_gradients_reach_both_streams():
+    """Both streams must receive gradient, or one of them is dead weight.
+
+    Do NOT use `fused.sum()` as the objective: `fused` comes out of a LayerNorm,
+    whose weight is all ones at init, so sum(LayerNorm(x)) == 0 identically and the
+    gradient to every upstream tensor is exactly zero. That is a property of the
+    objective, not a wiring fault. Use a random projection instead -- it stands in
+    for the classification head that follows in the real model.
+    """
+    torch.manual_seed(0)
     f = make()
     s = torch.randn(2, 20, 64, requires_grad=True)
     q = torch.randn(2, 12, 32, requires_grad=True)
-    f(s, q)["fused"].sum().backward()
-    assert s.grad.abs().sum() > 0 and q.grad.abs().sum() > 0
+    fused = f(s, q)["fused"]
+    (fused * torch.randn_like(fused)).sum().backward()
+    assert s.grad.abs().sum() > 0, "spatial stream receives no gradient"
+    assert q.grad.abs().sum() > 0, "frequency stream receives no gradient"
+
+
+def test_layernorm_sum_is_degenerate():
+    """Documents the trap above so it is not reintroduced."""
+    ln = torch.nn.LayerNorm(16)
+    x = torch.randn(2, 16, requires_grad=True)
+    ln(x).sum().backward()
+    assert x.grad.abs().sum() == 0
