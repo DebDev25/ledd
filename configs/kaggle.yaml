@@ -1,0 +1,7 @@
+# Kaggle overrides: read-only input path, 4 vCPU, checkpoints under /kaggle/working.
+_base_: default.yaml
+data:
+  root: /kaggle/input/genimage-224-ledd      # <-- change to your dataset slug
+  num_workers: 4
+train:
+  ckpt_dir: /kaggle/working/runs/joint

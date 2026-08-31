@@ -19,9 +19,14 @@ git remote add origin https://github.com/<your-user>/ledd.git
 git push -u origin main
 ```
 
-Make it **private** and add your two teammates as collaborators. GitHub is how the
-code reaches Colab and Kaggle — do not upload zips by hand, you will lose track of
-which version ran.
+The repo is **public**, so no tokens are needed anywhere — every teammate clones the
+same way, and Colab/Kaggle need no credentials at all. Add your two teammates as
+collaborators (Settings → Collaborators) so they can push. GitHub is how the code
+reaches Colab and Kaggle — do not upload zips by hand, you will lose track of which
+version ran.
+
+Because it is public, never commit anything secret: no `kaggle.json`, no Hugging Face
+token, no API keys. `.gitignore` already excludes `data/`, `runs/` and `*.pth`.
 
 ### 0.2 New Colab notebook → Runtime → Change runtime type → **T4 GPU**
 
@@ -39,13 +44,15 @@ Colab ships torch and torchvision; `timm` (MobileViT weights), `fvcore` and `tho
 ### 0.4 Cell 2 — get the code
 
 ```python
-from getpass import getpass
-token = getpass("GitHub personal access token: ")     # private repo
-!git clone https://{token}@github.com/<your-user>/ledd.git
+!git clone https://github.com/<your-user>/ledd.git
 %cd /content/ledd
 ```
 
-(Public repo: drop the token and just `!git clone https://github.com/<user>/ledd.git`.)
+Public repo, so no token and no login. To pull your latest changes in a later
+session, `%cd /content/ledd` then `!git pull`.
+
+Pushing *from* Colab does still need credentials, so treat Colab as read-only:
+edit locally in PyCharm, push from there, `git pull` in Colab.
 
 ### 0.5 Cell 3 — unit tests
 

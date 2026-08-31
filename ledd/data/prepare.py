@@ -17,6 +17,18 @@ as a deliberate augmentation/degradation.
 
 Both rules are applied IDENTICALLY to reals and fakes (Chai et al.'s
 preprocessing-equalization warning).
+
+The JPEG bias (--equalize-jpeg)
+------------------------------
+GenImage's real images come from ImageNet and are JPEG-compressed; several of its
+fake subsets are PNG. Ricker et al., "Fake or JPEG? Revealing Common Biases in
+Generated Image Detection Datasets" (arXiv:2403.17608), show detectors exploit this
+difference instead of learning generator artifacts -- and simply saving both classes
+as PNG does NOT fix it, because the reals already carry baked-in JPEG artifacts.
+
+--equalize-jpeg Q re-encodes EVERY image (real and fake) at quality Q before the
+final save, giving both classes an identical compression history. Recommended ON.
+Report the setting in the paper; it materially affects cross-generator numbers.
 """
 from __future__ import annotations
 
@@ -66,6 +78,16 @@ def center_crop_or_resize(img: Image.Image, size: int) -> tuple[Image.Image, boo
     return img.crop((left, top, left + size, top + size)), upscaled
 
 
+def equalize_jpeg(img: Image.Image, quality: int) -> Image.Image:
+    """Give every image the same JPEG history -- see the module docstring."""
+    import io
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=int(quality))
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")
+
+
 def prepare_split(
     src_dir: str,
     dst_dir: str,
@@ -74,6 +96,7 @@ def prepare_split(
     n: int,
     size: int = 224,
     seed: int = 42,
+    jpeg_quality: Optional[int] = None,
 ) -> PrepareStats:
     """Sample `n` images from src_dir and write cropped PNGs to dst_dir/generator/label."""
     files = list_images(src_dir)
@@ -92,6 +115,8 @@ def prepare_split(
         try:
             with Image.open(src) as im:
                 crop, up = center_crop_or_resize(im, size)
+                if jpeg_quality is not None:
+                    crop = equalize_jpeg(crop, jpeg_quality)
                 crop.save(dst, format="PNG", optimize=True)
             n_up += int(up)
         except Exception:
@@ -108,6 +133,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     ap.add_argument("--n-per-class", type=int, default=10000)
     ap.add_argument("--size", type=int, default=224)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--equalize-jpeg", type=int, default=95, metavar="Q",
+                    help="re-encode every image at JPEG quality Q so reals and fakes share "
+                         "an identical compression history (arXiv:2403.17608). 0 disables.")
     ap.add_argument(
         "--layout",
         default="{gen}/{split}/{label}",
@@ -128,7 +156,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(f"!! missing {src} -- skipping")
                 continue
             stats.append(prepare_split(src, args.dst, gen, label,
-                                       args.n_per_class, args.size, args.seed))
+                                       args.n_per_class, args.size, args.seed,
+                                       args.equalize_jpeg or None))
 
     os.makedirs(args.dst, exist_ok=True)
     meta = {
@@ -137,6 +166,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         "seed": args.seed,
         "crop_policy": "center_crop_no_resize_unless_too_small",
         "format": "png_lossless",
+        "equalize_jpeg": args.equalize_jpeg or None,
         "stats": [asdict(s) for s in stats],
     }
     with open(os.path.join(args.dst, "archive_meta.json"), "w") as f:

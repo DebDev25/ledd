@@ -8,10 +8,13 @@ data:
   ood_root: data/ood               # SDXL / SD3 / Flux + reals
   image_size: 224
   num_workers: 4
-  # Generator split (see Architecture doc S7.1)
-  train_generators: [sd_v14, sd_v15, wukong, vqdm, biggan, midjourney]
-  val_generator: adm               # checkpoint selection + tuning
-  test_generators: [glide]         # untouched until final eval
+  # Generator split (see Architecture doc S7.1).
+  # Midjourney is held out as the TEST generator on purpose: GenImage's own
+  # correlation analysis makes it the hardest transfer target, so it is the
+  # honest final exam. GLIDE trains, ADM validates (moderately dissimilar).
+  train_generators: [sd_v14, sd_v15, wukong, vqdm, biggan, glide]
+  val_generator: adm               # checkpoint selection + tuning ONLY
+  test_generators: [midjourney]    # untouched until the single final evaluation
   per_generator_per_class: 10000   # 10k fake + 10k real per generator
 
 augment:
