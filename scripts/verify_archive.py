@@ -92,6 +92,7 @@ def main() -> int:
         return 1
 
     rows, problems = scan(args.archive, args.generators, args.size, args.sample)
+    warnings: list[str] = []
 
     w = max(len(r["generator"]) for r in rows) + 2
     print(f"{'generator':<{w}}{'real':>8}{'fake':>8}  formats")
@@ -109,8 +110,13 @@ def main() -> int:
               f"n_per_class={meta.get('n_per_class')} "
               f"equalize_jpeg={meta.get('equalize_jpeg')}")
         if not meta.get("equalize_jpeg"):
-            problems.append("equalize_jpeg is OFF -- the real/fake JPEG bias "
-                            "(arXiv:2403.17608) may still be present")
+            # NOT a hard failure: a PNG/PNG archive may still be clean, and it may
+            # not be. Format alone cannot tell -- PNG losslessly preserves JPEG
+            # artifacts. Measure it rather than assume either way.
+            warnings.append("equalize_jpeg is OFF. This is not automatically a fault, but "
+                            "PNG/PNG does not prove the archive is clean -- PNG preserves "
+                            "source JPEG artifacts exactly. Decide with:\n"
+                            "      python scripts/audit_jpeg_history.py --archive <archive>")
     else:
         problems.append("archive_meta.json missing -- preprocessing settings not recorded, "
                         "which you need for the paper's reproducibility section")
@@ -123,12 +129,17 @@ def main() -> int:
         print("  none in the sampled subset")
 
     print()
+    for w_ in warnings:
+        print("  ~ " + w_)
     if problems:
         for p in problems:
             print("  ! " + p)
-        print(f"\n{len(problems)} issue(s). Fix before training.")
+        print(f"\n{len(problems)} blocking issue(s). Fix before training.")
         return 1
-    print("Archive looks good.")
+    if warnings:
+        print(f"\n{len(warnings)} warning(s), 0 blocking issues.")
+    else:
+        print("Archive looks good.")
     return 0
 
 
