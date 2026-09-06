@@ -9,6 +9,7 @@ Produces:
 """
 import json
 import os
+import random
 
 from _common import base_parser, get_config
 
@@ -20,6 +21,7 @@ from ledd.engine.train import build_model
 from ledd.explain import (deletion_insertion_bands, deletion_insertion_pixels,
                           explain_batch, normalize_map, random_baseline_maps,
                           validate_balance_metric)
+from ledd.models.attention import set_attention_recording
 
 if __name__ == "__main__":
     ap = base_parser(__doc__)
@@ -39,7 +41,12 @@ if __name__ == "__main__":
     model.eval()
 
     splits = load_splits(os.path.join(cfg["train"]["ckpt_dir"], "splits.json"))
-    loader = build_loader(splits[args.split], args.batch_size, train=False,
+    # SHUFFLE: build_index emits every real image before every fake one, and the eval
+    # loader does not shuffle. Without this the first N batches are single-class, which
+    # makes deletion/insertion curves flat and meaningless.
+    items = list(splits[args.split])
+    random.Random(0).shuffle(items)
+    loader = build_loader(items, args.batch_size, train=False,
                           num_workers=cfg["data"].get("num_workers", 2))
 
     os.makedirs(args.out, exist_ok=True)
@@ -60,6 +67,14 @@ if __name__ == "__main__":
         if maps.get("band_attribution") is not None:
             agg["band"].append(deletion_insertion_bands(model, x, maps["band_attribution"]))
 
+    def _balance(m, ld, dev):
+        # the balance metric is only materialised while attention recording is on
+        set_attention_recording(m, store_attn=True, store_grad=False)
+        try:
+            return validate_balance_metric(m, ld, dev)
+        finally:
+            set_attention_recording(m, store_attn=False, store_grad=False)
+
     def mean_of(key, field):
         vals = [d[field] for d in agg[key] if field in d]
         return float(sum(vals) / len(vals)) if vals else None
@@ -75,7 +90,7 @@ if __name__ == "__main__":
             "deletion_auc": mean_of("band", "band_deletion_auc"),
             "insertion_auc": mean_of("band", "band_insertion_auc"),
         },
-        "balance_validation": validate_balance_metric(model, loader, device),
+        "balance_validation": _balance(model, loader, device),
         "note": "deletion: LOWER is better; insertion: HIGHER is better. "
                 "Maps must beat the random control or they are not explanations.",
     }

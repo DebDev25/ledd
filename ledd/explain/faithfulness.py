@@ -22,9 +22,19 @@ import torch
 from ..engine.metrics import curve_auc
 
 
-def _score(model, x: torch.Tensor, **kw) -> torch.Tensor:
+def _score(model, x: torch.Tensor, pred_fake: Optional[torch.Tensor] = None, **kw) -> torch.Tensor:
+    """Probability of the PREDICTED class.
+
+    Returning P(fake) for every image breaks the metric on real images: removing their
+    evidence should raise P(fake), so the deletion curve runs backwards and the average
+    over a mixed batch cancels out. Scoring the predicted class makes "confidence in the
+    original decision" fall monotonically as evidence is removed, for both classes.
+    """
     with torch.no_grad():
-        return torch.sigmoid(model(x, **kw)["logit"])
+        p = torch.sigmoid(model(x, **kw)["logit"])
+    if pred_fake is None:
+        return p
+    return torch.where(pred_fake, p, 1.0 - p)
 
 
 def deletion_insertion_pixels(
@@ -39,6 +49,7 @@ def deletion_insertion_pixels(
     b, c, h, w = x.shape
     n = h * w
     order = saliency.flatten(1).argsort(dim=1, descending=True)      # most important first
+    pred_fake = _score(model, x) > 0.5                               # fixed once, at baseline
 
     if fill == "mean":
         base = x.mean(dim=(2, 3), keepdim=True).expand_as(x).clone()
@@ -56,8 +67,8 @@ def deletion_insertion_pixels(
     del_scores, ins_scores = [], []
     deleted, inserted = x.clone(), base.clone()
 
-    del_scores.append(_score(model, deleted).cpu())
-    ins_scores.append(_score(model, inserted).cpu())
+    del_scores.append(_score(model, deleted, pred_fake).cpu())
+    ins_scores.append(_score(model, inserted, pred_fake).cpu())
 
     for s in range(steps):
         idx = order[:, s * chunk:(s + 1) * chunk]
@@ -70,8 +81,8 @@ def deletion_insertion_pixels(
         gather = idx.unsqueeze(1).expand(-1, c, -1)
         flat_del.scatter_(2, gather, flat_base.gather(2, gather))
         flat_ins.scatter_(2, gather, flat_src.gather(2, gather))
-        del_scores.append(_score(model, deleted).cpu())
-        ins_scores.append(_score(model, inserted).cpu())
+        del_scores.append(_score(model, deleted, pred_fake).cpu())
+        ins_scores.append(_score(model, inserted, pred_fake).cpu())
 
     d = torch.stack(del_scores, dim=1)      # (B, steps+1)
     i = torch.stack(ins_scores, dim=1)
@@ -99,18 +110,19 @@ def deletion_insertion_bands(
     b, nb = band_attribution.shape
     n_bands = n_bands or nb
     order = band_attribution.argsort(dim=1, descending=True)
+    pred_fake = _score(model, x) > 0.5                               # fixed once, at baseline
 
     del_mask = torch.ones(b, nb, device=x.device)
     ins_mask = torch.zeros(b, nb, device=x.device)
-    del_scores = [_score(model, x, band_mask=del_mask).cpu()]
-    ins_scores = [_score(model, x, band_mask=ins_mask).cpu()]
+    del_scores = [_score(model, x, pred_fake, band_mask=del_mask).cpu()]
+    ins_scores = [_score(model, x, pred_fake, band_mask=ins_mask).cpu()]
 
     for k in range(nb):
         idx = order[:, k:k + 1]
         del_mask = del_mask.scatter(1, idx, 0.0)
         ins_mask = ins_mask.scatter(1, idx, 1.0)
-        del_scores.append(_score(model, x, band_mask=del_mask).cpu())
-        ins_scores.append(_score(model, x, band_mask=ins_mask).cpu())
+        del_scores.append(_score(model, x, pred_fake, band_mask=del_mask).cpu())
+        ins_scores.append(_score(model, x, pred_fake, band_mask=ins_mask).cpu())
 
     d = torch.stack(del_scores, dim=1)
     i = torch.stack(ins_scores, dim=1)

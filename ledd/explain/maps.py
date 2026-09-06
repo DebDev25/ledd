@@ -39,7 +39,11 @@ def explain_batch(model, x: torch.Tensor, target: str = "logit",
     out = model(x)
     logit = out["logit"]
     model.zero_grad(set_to_none=True)
-    logit.sum().backward(retain_graph=True)
+    # Backward the score of the PREDICTED class, not raw fakeness. logit.sum() computes
+    # relevance for "more fake", which is correct for images predicted fake and inverted
+    # for images predicted real -- on a mixed batch that produces anti-correlated maps.
+    sign = torch.where(logit.detach() > 0, 1.0, -1.0)
+    (logit * sign).sum().backward(retain_graph=True)
 
     res: Dict[str, torch.Tensor] = {
         "logit": logit.detach(),
