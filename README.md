@@ -10,22 +10,40 @@ choice here.
 
 ## Status
 
-| Component | State |
+Code complete and verified. All three training stages have been run.
+
+| Result | Value |
 |---|---|
-| Data pipeline, leak check, degradations | code complete, tested |
-| Streams, fusion, detector | code complete, tests written |
-| Losses (BCE + SupCon + band entropy) | code complete, tests written |
-| Training engine (3 stages, resume, AMP) | code complete |
-| Explainability + faithfulness | code complete, tests written |
-| Baselines (ResNet50 / CNNDetection / NPR) | code complete |
-| Baselines (FIRE / DIRE) | adapters + instructions, external repos |
+| Model size | 6,306,633 parameters |
+| Dataset | 160,000 images, 8 generators, leak check clean (0.130 vs 0.125) |
+| Frequency stream alone | 0.876 in-dist → 0.829 unseen (gap 0.047) |
+| Spatial stream alone | 0.9998 in-dist → 0.917 unseen (gap 0.083) |
+| Joint, cross-attention | 0.946 best / 0.905 mean (swing 0.097) |
+| Joint, concatenation | 0.937 best / **0.928 mean** (swing 0.018) |
+| After threshold calibration | ADM F1 0.876 · Midjourney F1 0.897, AUC 0.963 |
+
+**Two findings worth knowing before reading the code:**
+
+1. **Simple concatenation beats cross-attention** on every stable measure. Reported as a
+   negative result rather than selecting the noisier model's best epoch.
+2. **Attention does not explain the decision.** Band attention peaks mid-band while causal
+   deletion shows the highest band carries the signal (removing it: 0.830 → 0.560). At
+   stream level, attention claims 97% frequency reliance where deletion shows 4%.
+
+Remaining: seeds, ablations A3/A5/A6, the SDXL/SD3/Flux set, and baselines.
+
+### Always calibrate before quoting accuracy or F1
+
+`scripts/calibrate_threshold.py` fits the decision threshold on the **validation
+generator** and applies it everywhere. AUC is threshold-free and unaffected, but F1 moved
+from 0.775 to 0.876 with no change to the model.
 
 **Nothing has been run on a GPU yet.** Config/data tests (13) pass; the
 torch-dependent tests are written but need a machine with torch installed.
 
-**Start here:** `COLAB_SETUP.md` — phased setup that verifies the code on synthetic
-data before you download a single GB. Run `pytest tests/ -q` then
-`python scripts/smoke_test.py --cuda` first thing.
+**Start here:** `notebooks/LEDD_kaggle_runbook.ipynb` — the working run book, with every
+path absolute and each phase marked done or pending. `COLAB_SETUP.md` covers first-time
+setup on a fresh machine.
 
 ## Install
 

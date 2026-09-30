@@ -12,3 +12,8 @@ __pycache__/
 .pytest_cache/
 kaggle.json
 .env
+
+# IDE settings — machine-specific, should never be shared
+.idea/
+.vscode/
+*.iml
