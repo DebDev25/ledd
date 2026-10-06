@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Train a baseline on the SAME splits/preprocessing/degradations as LEDD."""
+import importlib
 import json
 import os
 import sys
@@ -9,7 +10,11 @@ from _common import base_parser, get_config
 import torch
 
 from ledd.baselines import build_baseline
-from ledd.engine import train as train_mod
+
+# NOTE: `from ledd.engine import train` gives the FUNCTION, because engine/__init__.py
+# re-exports it under the same name as the module. import_module bypasses that shadowing
+# and returns the real module object, which is what we need in order to patch build_model.
+train_mod = importlib.import_module("ledd.engine.train")
 
 if __name__ == "__main__":
     ap = base_parser(__doc__)

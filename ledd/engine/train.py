@@ -58,15 +58,30 @@ def build_model(cfg: Dict[str, Any]) -> torch.nn.Module:
 
 def build_optimizer(model: torch.nn.Module, cfg: Dict[str, Any]) -> torch.optim.Optimizer:
     tc = cfg["train"]
+    wd = tc.get("weight_decay", 0.05)
     if hasattr(model, "param_groups"):
-        groups = model.param_groups(tc["lr_backbone"], tc["lr_new"], tc.get("weight_decay", 0.05))
+        groups = model.param_groups(tc["lr_backbone"], tc["lr_new"], wd)
     else:
-        backbone = [p for n, p in model.named_parameters() if n.startswith("stream.backbone") and p.requires_grad]
-        rest = [p for n, p in model.named_parameters() if not n.startswith("stream.backbone") and p.requires_grad]
-        groups = [
-            {"params": backbone, "lr": tc["lr_backbone"], "weight_decay": tc.get("weight_decay", 0.05)},
-            {"params": rest, "lr": tc["lr_new"], "weight_decay": tc.get("weight_decay", 0.05)},
-        ]
+        # Plain models (single streams, baselines): the final classification layer is
+        # "new", everything else is a pretrained backbone. Matching only on
+        # "stream.backbone" left every baseline parameter at lr_new, which is far too
+        # high for a pretrained ResNet-50 and produces an unfairly weak baseline.
+        head_keys = ("fc.", "head.", "classifier.")
+        backbone, new_params, no_decay = [], [], []
+        for n, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if p.ndim <= 1 or n.endswith(".bias"):
+                no_decay.append(p)
+            elif any(k in n for k in head_keys):
+                new_params.append(p)
+            else:
+                backbone.append(p)
+        groups = [g for g in (
+            {"params": backbone, "lr": tc["lr_backbone"], "weight_decay": wd},
+            {"params": new_params, "lr": tc["lr_new"], "weight_decay": wd},
+            {"params": no_decay, "lr": tc["lr_new"], "weight_decay": 0.0},
+        ) if g["params"]]          # drop empty groups
     return torch.optim.AdamW(groups)
 
 
