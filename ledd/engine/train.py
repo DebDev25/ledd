@@ -33,7 +33,21 @@ from .metrics import classification_metrics
 
 
 def build_model(cfg: Dict[str, Any]) -> torch.nn.Module:
+    """Construct the model named by cfg['stage'].
+
+    `stage: baseline` must be handled here rather than only inside train_baseline.py,
+    otherwise evaluate.py / calibrate_threshold.py silently build a LEDDDetector and
+    fail to load a baseline checkpoint.
+    """
     stage = cfg.get("stage", "joint")
+    if stage == "baseline":
+        from ..baselines import build_baseline      # local import avoids a cycle
+
+        bcfg = dict(cfg.get("baseline", {}))
+        name = bcfg.pop("name", None)
+        if not name:
+            raise ValueError("stage='baseline' requires cfg['baseline']['name']")
+        return build_baseline(name, **bcfg)
     if stage == "spatial":
         s = SpatialStream(
             name=cfg["model"]["spatial"].get("name", "mobilevit_s"),
