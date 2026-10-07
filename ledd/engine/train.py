@@ -170,14 +170,25 @@ def train(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # --------------------------------------------------------------- model
     model = build_model(cfg).to(device)
-    if stage == "joint" and cfg.get("init"):
+    init_cfg = cfg.get("init") or {}
+    if stage == "joint" and init_cfg:
         rep = model.load_stream_checkpoints(
-            cfg["init"].get("spatial_ckpt"), cfg["init"].get("frequency_ckpt")
+            init_cfg.get("spatial_ckpt"), init_cfg.get("frequency_ckpt")
         )
         log.info(f"loaded stream checkpoints: { {k: len(v['missing']) for k, v in rep.items()} } missing keys")
-        if cfg["init"].get("freeze_streams", False):
+        if init_cfg.get("freeze_streams", False):
             model.freeze_streams(True)
             log.info("streams frozen (ablation)")
+    elif stage in ("spatial", "frequency") and init_cfg.get(f"{stage}_ckpt"):
+        # Single-stream runs can also start from a pretrained stream. Needed for the
+        # matched control: spatial-only with the SAME initialisation and schedule as the
+        # joint model, which is the only fair test of what the second stream contributes.
+        ck = torch.load(init_cfg[f"{stage}_ckpt"], map_location="cpu", weights_only=False)
+        sd = ck.get("model", ck)
+        sub = {k[len("stream."):]: v for k, v in sd.items() if k.startswith("stream.")}
+        missing = model.stream.load_state_dict(sub or sd, strict=False)
+        log.info(f"initialised {stage} stream from {init_cfg[f'{stage}_ckpt']} "
+                 f"({len(missing.missing_keys)} missing, {len(missing.unexpected_keys)} unexpected)")
 
     criterion = CombinedLoss(cfg).to(device)
     # Band attention is only materialised when something actually consumes it.
