@@ -1,0 +1,4 @@
+# Demo-only extras. The model itself needs nothing beyond the root requirements.
+gradio>=4.44,<6
+matplotlib>=3.7
+pillow>=10.0
