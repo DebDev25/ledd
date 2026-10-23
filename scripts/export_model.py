@@ -68,7 +68,16 @@ if __name__ == "__main__":
     # The SupCon projection head is training-only. Dropping it keeps the
     # "6.3M parameters" claim honest for the thing we actually ship.
     sd = {k: v for k, v in model.state_dict().items() if not k.startswith("projection.")}
-    n_params = sum(v.numel() for v in sd.values())
+
+    # Count PARAMETERS, not state_dict entries. state_dict also carries buffers --
+    # BatchNorm running_mean/running_var and friends, 12,288 of them here -- and summing
+    # it reports 5,587,849 where the parameter count is 5,575,561. That 12k discrepancy
+    # is small enough to look like a rounding artefact and is exactly the kind of number
+    # that ends up in an abstract. Report the two separately.
+    param_names = {n for n, _ in model.named_parameters()}
+    n_params = sum(v.numel() for k, v in sd.items() if k in param_names)
+    n_buffers = sum(v.numel() for k, v in sd.items() if k not in param_names)
+    n_total = sum(p.numel() for p in model.parameters())
 
     threshold, calib = 0.0, None
     if args.calibration and os.path.exists(args.calibration):
@@ -86,7 +95,10 @@ if __name__ == "__main__":
             "epoch": int(ck.get("epoch", -1)) if isinstance(ck, dict) else -1,
             "git_sha": _git_sha(),
             "torch": torch.__version__,
-            "n_params_deployed": n_params,
+            "n_params_deployed": n_params,      # parameters only, projection head excluded
+            "n_params_total": n_total,          # includes the training-only projection head
+            "n_buffers": n_buffers,             # BatchNorm running stats etc., not parameters
+            "fusion_mode": cfg["model"]["fusion"]["mode"],
             "image_size": cfg.get("data", {}).get("image_size", 224),
             "n_bands": cfg["model"]["frequency"].get("n_bands", 12),
             "preprocessing": "center_crop_no_resize; imagenet mean/std; FFT computed in-model",
@@ -98,7 +110,9 @@ if __name__ == "__main__":
     torch.save(bundle, args.out)
     sha = hashlib.sha256(open(args.out, "rb").read()).hexdigest()[:16]
     print(json.dumps({"out": args.out, "sha256_16": sha,
-                      "params": n_params, "threshold": threshold,
+                      "params_deployed": n_params, "params_total": n_total,
+                      "buffers": n_buffers, "fusion_mode": bundle["meta"]["fusion_mode"],
+                      "threshold": threshold,
                       "mb": round(os.path.getsize(args.out) / 1e6, 2)}, indent=2))
 
     if args.torchscript:

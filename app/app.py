@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ledd.data.dataset import to_tensor_normalized  # noqa: E402
 from ledd.data.prepare import center_crop_or_resize  # noqa: E402
 from ledd.engine.train import build_model  # noqa: E402
+from ledd.models.attention import set_attention_recording  # noqa: E402
 
 STATE = {}
 
@@ -61,6 +62,10 @@ def load_bundle(path: str, device: str = "cpu"):
     model = build_model(b["config"])
     model.load_state_dict(b["state_dict"], strict=False)   # projection head is absent by design
     model.eval().to(device)
+    # band_attention() returns None unless recording is on -- it reads the stored
+    # attention tensor of the last block. Without this the attention panel would be
+    # silently all-zero, which on this of all projects would be the wrong bug to ship.
+    set_attention_recording(model, store_attn=True, store_grad=False)
     STATE.update(
         model=model, device=device, threshold=float(b["threshold"]),
         n_bands=int(b["meta"]["n_bands"]), size=int(b["meta"]["image_size"]),
@@ -103,8 +108,9 @@ def analyse(img: Image.Image):
         drops.append(conf0 - (p if is_fake else 1.0 - p))
 
     # ---- attention, for contrast only
-    att = out.get("band_attention")
-    att = att[0].float().cpu().numpy() if att is not None else np.zeros(n)
+    raw_att = out.get("band_attention")
+    have_att = raw_att is not None
+    att = raw_att[0].float().cpu().numpy() if have_att else np.zeros(n)
 
     labels = band_labels(n)
     fig, ax = plt.subplots(2, 1, figsize=(9, 5.4), sharex=True)
@@ -114,8 +120,10 @@ def analyse(img: Image.Image):
     ax[0].set_ylabel("confidence drop")
     ax[0].axhline(0, lw=0.8, color="k")
     ax[1].bar(labels, att, color="#34495e")
-    ax[1].set_title("Attention over bands  (shown for contrast - NOT a faithful explanation)",
-                    fontsize=10, loc="left")
+    ax[1].set_title(
+        "Attention over bands  (shown for contrast - NOT a faithful explanation)" if have_att
+        else "Attention unavailable - recording is off, so this panel is empty",
+        fontsize=10, loc="left")
     ax[1].set_ylabel("attention")
     ax[1].set_xlabel("frequency band (normalised radius)")
     plt.setp(ax[1].get_xticklabels(), rotation=45, ha="right", fontsize=7)

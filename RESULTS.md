@@ -19,6 +19,7 @@ AUC is the primary metric; accuracy and F1 only after threshold calibration.
 | Check | Result | Reading |
 |---|---|---|
 | Archive | 160,000 images, 8 generators, balanced, no cross-class duplicates | clean |
+| Split integrity (hashed across all 25 runs) | `val_generator` 1 hash (n=20,000) · `test_generator` 1 hash (n=20,000) · `train`/`val_indist` 3 hashes, one per seed | clean — see note |
 | Spectral leak check | **0.130** vs 0.125 chance (8-way, real images only) | pipeline does not encode generator identity |
 | JPEG-history audit (pooled) | AUC 0.468, dev 0.032 | clean pooled |
 | JPEG-history per generator | sd_v14 0.377 · sd_v15 0.328 · wukong 0.351 · vqdm 0.505 · biggan 0.514 · glide 0.544 · **adm 0.469** · **midjourney 0.668** | pooled value is misleading — opposite-direction biases cancel |
@@ -29,6 +30,18 @@ for all model selection, is clean (0.469).
 
 `equalize_jpeg` was **off** when the archive was built. The audit says this is not
 exploitable at pooled level, so the archive was not regenerated.
+
+**Why `train` has three hashes and that is not a problem.** `make_splits` seeds only
+`rng.shuffle(train_items)`, which carves the 5% in-distribution holdout out of the training
+generators. The generator *roles* come from the config, and `val_generator` / `test_generator`
+are built by `build_index()` — a sorted directory listing with no RNG. So changing the seed
+repartitions train/val_indist and nothing else: **all 25 runs are scored on the same 20,000
+ADM and 20,000 Midjourney images**. Counts check: 114,000 + 6,000 = 120,000 = 6 x 20,000.
+
+Consequence worth stating in the paper: the seeded standard deviations capture
+data-partition variance as well as initialisation variance, which strengthens the 3.7-sigma
+control rather than weakening it. The only seed-dependent quantities are in-distribution AUCs
+(0.9998 spatial, 0.9889 ResNet-50 epoch 0), both single-seed and used qualitatively in S8.
 
 ---
 
@@ -45,7 +58,7 @@ The spatial stream's gap is **1.88x** the frequency stream's either way.
 | Frequency stream alone | <1M | 0.829 (in-dist 0.871 at the same epoch, **gap 0.042**) | — |
 | Spatial stream alone | 5.6M | 0.917 (in-dist 0.996 at the same epoch, **gap 0.079**) | — |
 | Joint, cross-attention | 6.3M | best 0.933 ± 0.012 · mean 0.906 ± 0.001 | 0.963 |
-| **Joint, concatenation** | **6.3M** | best **0.935 ± 0.003** · mean **0.923 ± 0.005** | **0.975** |
+| **Joint, concatenation** | **5.6M** | best **0.935 ± 0.003** · mean **0.923 ± 0.005** | **0.975** |
 
 **Reported model: concatenation.** Cross-attention is tied on best-epoch, worse on the
 honest (mean) measure, and markedly less stable: std of best-epoch across seeds is
@@ -80,7 +93,7 @@ All baselines retrained with the corrected optimiser (backbone 1e-4, head 1e-3).
 | NPR | 1.44M | 0.931 | 0.905 | 0.831 | −0.026 |
 | CNNDetection | 25.6M | 0.927 | 0.963 | 0.883 | +0.037 |
 | ResNet50 | 25.6M | **0.945** | 0.890 | 0.795 | **−0.055** |
-| **LEDD (concat)** | **6.3M** | 0.935 | **0.975** | **0.902** | +0.040 |
+| **LEDD (concat)** | **5.6M** | 0.935 | **0.975** | **0.902** | +0.040 |
 
 Pre-fix values for the record: CNNDetection ADM 0.924 / MJ 0.964; ResNet50 ADM 0.936 /
 MJ 0.953. The fix raised both on ADM and lowered ResNet50 on MJ.
@@ -149,7 +162,7 @@ be audited.**
 | NPR | 1.44M | 0.848 | 0.793 | 0.768 | 0.814 | **0.588** | 0.741 | 0.588 |
 | ResNet50 | 25.6M | 0.909 | 0.861 | 0.823 | 0.753 | 0.778 | 0.804 | 0.753 |
 | CNNDetection | 25.6M | 0.941 | 0.919 | 0.897 | **0.879** | 0.845 | 0.885 | 0.845 |
-| **LEDD** | **6.3M** | **0.983** | **0.950** | **0.922** | 0.845 | **0.912** | **0.907** | 0.845 |
+| **LEDD** | **5.6M** | **0.983** | **0.950** | **0.922** | 0.845 | **0.912** | **0.907** | 0.845 |
 
 **LEDD leads on the compression-matched figure by +0.025** (0.922 vs 0.897) and on clean by
 +0.042. Degraded mean +0.022. Worst case ties CNNDetection at 0.845, but the failure modes
@@ -171,7 +184,7 @@ Equalised set (blockiness 0.444, dev 0.056). These are final.
 | NPR | 1.44M | 0.777 | 0.811 | 0.781 | 0.704 | 0.665 | 0.740 | 0.665 |
 | ResNet50 | 25.6M | 0.912 | 0.892 | 0.855 | 0.753 | 0.817 | 0.829 | 0.753 |
 | CNNDetection | 25.6M | **0.991** | **0.982** | **0.966** | **0.903** | 0.922 | 0.943 | **0.903** |
-| **LEDD** | **6.3M** | 0.985 | 0.973 | 0.945 | 0.901 | **0.962** | **0.946** | 0.901 |
+| **LEDD** | **5.6M** | 0.985 | 0.973 | 0.945 | 0.901 | **0.962** | **0.946** | 0.901 |
 
 **LEDD and CNNDetection are statistically indistinguishable on PixArt-Sigma.** Degraded
 mean 0.9455 vs 0.9432 (delta +0.0023 to LEDD); worst case 0.9012 vs 0.9028 (delta -0.0016).
@@ -328,7 +341,24 @@ model.
 
 ## 7. Efficiency
 
-6,306,633 parameters. No diffusion model and no large frozen encoder at inference.
+**CORRECTED 2026-10-23.** The figure 6,306,633 that appeared here and throughout earlier
+drafts is the **cross-attention** model — `measure_efficiency.py` was run with
+`configs/kaggle.yaml`, which inherits `default.yaml` and its `mode: cross_attention`. The
+reported model is concatenation, and it is smaller:
+
+| Model | Total params | Deployed (no projection head) | Fusion block |
+|---|---|---|---|
+| **Concat (reported)** | **5,637,321** | **5,575,561** | 130,752 |
+| Cross-attention (rejected) | 6,306,633 | 6,244,873 | 800,064 |
+
+The whole 669,312 difference is the fusion block. Report **5.6M**, not 6.3M. This makes the
+efficiency claim stronger, not weaker: 5.64M against 25.6M is under a quarter.
+
+Also note `export_model.py` originally summed `state_dict()` entries, which include
+BatchNorm buffers (12,288), and so printed 5,587,849 rather than 5,575,561. Fixed; the
+bundle now reports parameters and buffers separately.
+
+5,637,321 parameters. No diffusion model and no large frozen encoder at inference.
 FLOPs via fvcore **undercount** — `scaled_dot_product_attention` and `fft_fft2` are
 unsupported operators, so report as "conv+linear FLOPs" or cross-check with thop.
 
@@ -371,7 +401,7 @@ validation generator was necessary.
 
 ## 10. Claims the paper can make
 
-1. A 6.3M-parameter detector **beats all 25M baselines on the held-out test generator**
+1. A 5.6M-parameter detector **beats all 25M baselines on the held-out test generator**
    (0.975 vs 0.963 / 0.890) and **on degraded images** (mean 0.910 vs 0.890; worst case
    0.868 vs 0.822).
 2. **Attention-based explanations are unfaithful**, shown three independent ways.
