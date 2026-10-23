@@ -1,0 +1,23 @@
+# UniversalFakeDetect (Ojha et al., CVPR 2023): linear probe on frozen CLIP ViT-L/14.
+#
+# Only the head trains, so this converges in very few epochs -- but every epoch still
+# forwards 114k images through a 304M-parameter encoder, which is the entire cost.
+# Three epochs is roughly 50-70 min on a Kaggle P100/T4. Raising this buys almost
+# nothing: the probe is converged, and the cost is linear.
+#
+# batch_size 64 rather than 128: ViT-L/14 activations are large and 128 OOMs on 16GB.
+# augment enabled to match the other baselines -- same splits, same preprocessing,
+# same degradations, or the comparison is meaningless.
+_base_: ../default.yaml
+stage: baseline
+baseline: {name: univfd}
+augment: {enabled: true}
+loss: {supcon_weight: 0.0, band_entropy_weight: 0.0}
+train:
+  epochs: 3
+  batch_size: 64
+  lr_backbone: 0.0          # frozen; nothing to train there
+  lr_new: 1.0e-3
+  ckpt_dir: runs/base_univfd
+eval:
+  batch_size: 64
