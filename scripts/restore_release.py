@@ -42,7 +42,10 @@ def seed_of(run: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--zip", required=True)
+    ap.add_argument("--src", "--zip", dest="src", required=True,
+                    help="the release .zip, OR a directory holding its already-extracted "
+                         "contents -- Kaggle unpacks uploaded archives when creating a "
+                         "dataset, so the zip often does not survive as a file")
     ap.add_argument("--out", default="/kaggle/working",
                     help="runs/ , ood/ and the bundle are written under here")
     ap.add_argument("--verify", action="store_true",
@@ -55,11 +58,25 @@ def main() -> int:
     stage = os.path.join(a.out, "_release_stage")
     shutil.rmtree(stage, ignore_errors=True)
 
-    with zipfile.ZipFile(a.zip) as z:
-        members = [m for m in z.namelist() if not m.endswith("/")]
-        if a.no_ood:
-            members = [m for m in members if not m.startswith("ood/")]
-        z.extractall(stage, members=members)
+    if os.path.isdir(a.src):
+        # Already extracted. Accept either the archive root itself or a directory
+        # containing it, since Kaggle sometimes nests the contents one level down.
+        root = a.src
+        if not os.path.exists(os.path.join(root, "manifest.json")):
+            subs = [d for d in os.listdir(root)
+                    if os.path.exists(os.path.join(root, d, "manifest.json"))]
+            if subs:
+                root = os.path.join(root, subs[0])
+        print(f"source: directory {root}")
+        shutil.copytree(root, stage,
+                        ignore=shutil.ignore_patterns("ood") if a.no_ood else None)
+    else:
+        print(f"source: archive {a.src}")
+        with zipfile.ZipFile(a.src) as z:
+            members = [m for m in z.namelist() if not m.endswith("/")]
+            if a.no_ood:
+                members = [m for m in members if not m.startswith("ood/")]
+            z.extractall(stage, members=members)
 
     manifest = {}
     mp = os.path.join(stage, "manifest.json")
