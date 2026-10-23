@@ -198,11 +198,19 @@ def tile(img: Image.Image, size: int, max_tiles: int = 16):
         crop, up = center_crop_or_resize(img, size)
         return [crop], up, [(0, 0)]
 
-    per_axis = max(1, int(math.isqrt(max_tiles)))
-    nx = min(per_axis, max(1, w // size))
-    ny = min(per_axis, max(1, h // size))
-    xs = [0] if nx == 1 else [round(i * (w - size) / (nx - 1)) for i in range(nx)]
-    ys = [0] if ny == 1 else [round(i * (h - size) / (ny - 1)) for i in range(ny)]
+    # Enough positions per axis that consecutive crops touch or overlap -- a grid with
+    # gaps skips image, and nothing says the skipped strips carry less evidence. Then
+    # thin out only if the count would exceed max_tiles.
+    def positions(extent):
+        k = math.ceil((extent - size) / size) + 1          # stride <= size => no gaps
+        return [0] if k <= 1 else [round(i * (extent - size) / (k - 1)) for i in range(k)]
+
+    xs, ys = positions(w), positions(h)
+    while len(xs) * len(ys) > max_tiles and (len(xs) > 1 or len(ys) > 1):
+        if len(xs) >= len(ys) and len(xs) > 1:
+            xs = xs[::2] if len(xs) > 2 else xs[:1]
+        elif len(ys) > 1:
+            ys = ys[::2] if len(ys) > 2 else ys[:1]
     boxes = [(x, y) for y in ys for x in xs]
     return [img.crop((x, y, x + size, y + size)) for (x, y) in boxes], False, boxes
 
@@ -220,7 +228,7 @@ def montage(crops, cell: int = 96, cols: int = 4) -> Image.Image:
 @torch.no_grad()
 def analyse(img: Image.Image):
     if img is None:
-        return None, "Upload an image first.", None, None, None
+        return None, "Upload an image first.", "", None, None, None
     model, dev = STATE["model"], STATE["device"]
     n, T = STATE["n_bands"], STATE["threshold"]
 
@@ -288,25 +296,54 @@ def analyse(img: Image.Image):
     refs = STATE.get("references")
     ranks = {k: pct_rank(logit, v["pct"]) for k, v in refs["populations"].items()} if refs else {}
     if ranks:
-        parts = []
-        for k, r in ranks.items():
-            parts.append(f"higher than **{r:.0f}%** of measured {k}")
-        headline = "WHERE THIS SCORE FALLS"
+        # The overlap band is where both measured populations have mass. Inside it the
+        # model genuinely cannot separate the two, and saying so is the correct output --
+        # a confident answer there would be invented, not measured.
+        gen = [v["pct"] for k, v in refs["populations"].items() if "gener" in k.lower()]
+        rel = [v["pct"] for k, v in refs["populations"].items() if "real" in k.lower()]
+        lo = max(q["5"] for q in gen) if gen else T
+        hi = min(q["95"] for q in rel) if rel else T
+        if logit < min(lo, hi):
+            headline = "PROBABLY A REAL PHOTO"
+            plain = ("It scores below the range where generated images start to appear. "
+                     f"Of the {refs['populations']['real photographs']['n']} real photographs "
+                     f"we measured, about {100 - ranks['real photographs']:.0f}% scored "
+                     "higher than this one.")
+        elif logit > max(lo, hi):
+            headline = "PROBABLY AI-GENERATED"
+            plain = ("It scores above almost every real photograph we measured, in the "
+                     "range typical of an image generator.")
+        else:
+            headline = "TOO CLOSE TO CALL"
+            plain = ("Its score lands in the band where real photographs and generated "
+                     "images overlap. This model cannot separate the two here, and a "
+                     "confident answer would be guesswork.")
+        plain += (" This is a leaning, not a verdict - the model was trained on one "
+                  "benchmark and image generators it has never seen may score anywhere.")
     else:
         headline = "LIKELY GENERATED" if is_fake else "LIKELY REAL"
-        parts = []
+        plain = ""
     top = int(np.argmax(drops))
     span = float(np.max(np.abs(drops)))
-    pos_lines = "".join(f"- This image scores {q}\n" for q in parts)
+    iw, ih = img.size
+    covered = set()
+    for bx, by in boxes:                       # union, so overlap is not double-counted
+        covered |= {(a_, b_) for a_ in range(bx, bx + STATE["size"], 32)
+                    for b_ in range(by, by + STATE["size"], 32)}
+    coverage = min(100.0, 100.0 * len(covered) /
+                   max(1, len(range(0, iw, 32)) * len(range(0, ih, 32))))
+    if coverage < 60:
+        plain += (f" Note: this image is large, so only about {coverage:.0f}% of it was "
+                  "sampled - the rest was not looked at.")
     md = (
         f"### {headline}\n\n"
-        f"{pos_lines}"
+        f"{plain}\n\n"
         f"- Score **{score:.3f}** (0.5 = the decision threshold). Mean logit {logit:+.3f} "
         f"against threshold {T:+.3f}; raw sigmoid would read {p_raw:.4f}, which is why this "
         f"app does not show it.\n"
         f"- Read from **{len(crops)} crop{'s' if len(crops) != 1 else ''}** of "
-        f"{STATE['size']}px at native scale, per-crop logits "
-        f"{per_crop.min():+.2f} to {per_crop.max():+.2f} "
+        f"{STATE['size']}px at native scale covering **{coverage:.0f}%** of the image, "
+        f"per-crop logits {per_crop.min():+.2f} to {per_crop.max():+.2f} "
         f"({int((per_crop >= T).sum())}/{len(crops)} above threshold)\n"
         f"- Largest causal band: **{labels[top]}**, worth {drops[top]:+.3f} logits "
         f"out of {abs(logit - T):.2f} above threshold\n"
@@ -342,17 +379,10 @@ def analyse(img: Image.Image):
                "a split vote often means part of the frame is uninformative rather than that "
                "part of the image is authentic. This model answers a whole-image question; "
                "it was never trained to localise.\n")
-    if ranks:
-        md += (
-            "\n> **No verdict is shown, because on arbitrary uploads a verdict is not "
-            "supportable.** Real photographs and some generators overlap in score: the "
-            "populations above share a band where both have mass, so no threshold "
-            "separates them. The paper's threshold (-7.52) is calibrated for a balanced "
-            "benchmark split of identically-preprocessed crops and flags about half of "
-            "ordinary photographs; any looser cut starts missing generators the model "
-            "has not seen. The score and its position are the honest output.\n")
     rows = [[labels[k], round(drops[k], 4), round(float(att[k]), 4)] for k in range(n)]
-    return (scale_figure(logit), md, chart, rows,
+    lead, _, detail = md.partition("- Score ")
+    detail = "- Score " + detail
+    return (scale_figure(logit), lead, detail, chart, rows,
             grid_overlay(img, len(crops), STATE["size"], boxes))
 
 
@@ -382,14 +412,16 @@ def build_ui():
                         f"balanced benchmark split and flags roughly half of ordinary "
                         f"photographs; this one trades detection for far fewer false alarms. "
                         f"Table I's figures use the paper value.*")
-                scale = gr.Image(label="Score in context", height=190)
                 verdict = gr.Markdown()
-                chart = gr.Image(label="Band attribution", height=420)
-                table = gr.Dataframe(
-                    headers=["band (radius)", "causal drop", "attention"],
-                    label="Per-band detail", wrap=True,
-                )
-        outs = [scale, verdict, chart, table, crop_view]
+                scale = gr.Image(label="Where this score sits", height=190)
+                with gr.Accordion("Technical detail", open=False):
+                    detail = gr.Markdown()
+                    chart = gr.Image(label="Band attribution", height=420)
+                    table = gr.Dataframe(
+                        headers=["band (radius)", "causal drop", "attention"],
+                        label="Per-band detail", wrap=True,
+                    )
+        outs = [scale, verdict, detail, chart, table, crop_view]
         btn.click(analyse, inputs=inp, outputs=outs)
         inp.change(analyse, inputs=inp, outputs=outs)
     return demo
@@ -401,8 +433,9 @@ if __name__ == "__main__":
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--share", action="store_true", help="public gradio.live link")
     ap.add_argument("--port", type=int, default=7860)
-    ap.add_argument("--max-tiles", type=int, default=16,
-                    help="cap on crops per image; 16 is ~1s on CPU")
+    ap.add_argument("--max-tiles", type=int, default=36,
+                    help="cap on crops per image; the grid is contiguous, so this only "
+                         "bites on very large images")
     ap.add_argument("--references", default=None,
                     help="references.json of measured score populations; without it the "
                          "app falls back to a bare threshold verdict")
