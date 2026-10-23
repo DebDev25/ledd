@@ -85,6 +85,10 @@ def main() -> int:
     ap.add_argument("--repo", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     ap.add_argument("--ckpt-runs", nargs="*", default=DEFAULT_CKPT_RUNS)
     ap.add_argument("--no-checkpoints", action="store_true")
+    ap.add_argument("--extra", nargs="*", default=[],
+                    help="loose files to include verbatim, e.g. ood_raw/prompts.json -- "
+                         "the COCO captions are the only thing that makes the OOD "
+                         "generation reproducible, and they are 0.1 MB")
     ap.add_argument("--keep-optimizer", action="store_true",
                     help="archive full checkpoints (3x larger, only needed to resume training)")
     args = ap.parse_args()
@@ -167,6 +171,13 @@ def main() -> int:
                 rel = os.path.relpath(p, odir)
                 take(p, f"ood/{tag}/{rel}", "ood")
 
+    # ---- 4b. loose extras
+    for src in args.extra:
+        if os.path.isfile(src):
+            take(src, f"extra/{os.path.basename(src)}", "extra")
+        else:
+            print(f"   (skipped, missing: {src})")
+
     # ---- 5. manifest + readme
     manifest["totals_mb"] = {k: round(v / 1e6, 1) for k, v in sizes.items()}
     json.dump(manifest, open(os.path.join(stage, "manifest.json"), "w"), indent=2)
@@ -184,7 +195,13 @@ def main() -> int:
             "              holdout differs by seed, hence one file per seed.\n"
             "checkpoints/  best.pth, optimiser state stripped (load-only, not resume-able\n"
             "              unless --keep-optimizer was used).\n"
-            "ood/          self-collected out-of-distribution image sets.\n"
+            "ood/          self-collected out-of-distribution image sets, 224 crops.\n"
+            "              'ood' is SDXL UN-equalised -- the set the paper reports for SDXL.\n"
+            "              'ood_pixart_eq' is PixArt equalised -- the set reported for PixArt.\n"
+            "              The other two are the comparison arms of the equalisation finding\n"
+            "              in Section V-G, not leftovers.\n"
+            "extra/        prompts.json: the COCO val2017 captions used to generate every\n"
+            "              fake. Without it the OOD sets cannot be regenerated.\n"
             "manifest.json sha256 and size of every file above.\n")
 
     out = shutil.make_archive(args.out, "zip", stage)
