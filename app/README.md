@@ -33,12 +33,21 @@ CPU is fine: 13 forward passes of a 6.3M-parameter model, roughly a second.
 |---|---|
 | P(generated) + calibrated verdict | threshold fitted on the validation generator (ADM) only |
 | Causal band attribution | each band zeroed in turn; exact, not approximated |
-| Band attention | displayed **for contrast**, labelled as not faithful |
+| Band attention | displayed for contrast, labelled as not faithful *in aggregate* |
 | Spatial heatmap | deliberately absent |
 
 The two attribution panels usually disagree, and that disagreement is the
 paper's Section V-E: attention concentrates mid-band, while deleting the
 highest band is what actually costs the model its decision.
+
+That evidence is dataset-level, measured on the standalone frequency stream
+against the validation generator. On any single image the two panels may agree
+by coincidence; "unfaithful" is a claim about the distribution, not a promise
+about every example.
+
+Band deletion is measured in **logit** space. In probability space a confident
+prediction saturates the sigmoid and every bar underflows to exactly zero, which
+reads as "no band matters" when the truth is "the decision was never in doubt".
 
 The spatial relevance maps pass the insertion test (0.765 against a 0.566 random
 control) but fail deletion (0.625 against 0.577). A heatmap in a user interface

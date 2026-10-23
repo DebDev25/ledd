@@ -128,7 +128,8 @@ def analyse(img: Image.Image):
     ax[0].axhline(0, lw=0.8, color="k")
     ax[1].bar(labels, att, color="#34495e")
     ax[1].set_title(
-        "Attention over bands  (shown for contrast - NOT a faithful explanation)" if have_att
+        "Attention over bands  (not faithful IN AGGREGATE - may coincide on any one image)"
+        if have_att
         else "Attention unavailable - recording is off, so this panel is empty",
         fontsize=10, loc="left")
     ax[1].set_ylabel("attention")
