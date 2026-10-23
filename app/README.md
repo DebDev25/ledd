@@ -55,6 +55,36 @@ reads as authoritative whether or not it has earned it, so it is left out until
 the deletion confound (constant-fill masking creates unnaturally smooth patches
 that a synthetic-image detector reacts to) is resolved.
 
+## Choosing a threshold
+
+The bundle carries **T = -7.52**, fitted to maximise F1 on a 50/50 ADM split of
+224-crop PNGs. That is the right number for the paper and the wrong one for a demo.
+On arbitrary uploads -- full-resolution JPEGs, arbitrary crop positions, platform
+resampling -- real photographs shift several logits toward "fake", and that cutoff
+flags **53% of them**.
+
+Measured on 66 real photographs and 120 full-resolution SDXL generations, both tiled
+the way the app tiles them:
+
+| Threshold | False positives | Fakes caught |
+|---|---|---|
+| -7.52 (paper) | 53.0% | 100% |
+| -3.00 | 9.1% | 90.0% |
+| -2.00 | 4.5% | 77.5% |
+| -1.00 | 1.5% | 53.3% |
+
+```bash
+python app/app.py --bundle runs/export/ledd_detector.pt --threshold -3.0
+```
+
+Same weights, same ranking, a different point on the ROC -- AUC is untouched, and the
+paper's F1 figures still use -7.52. The app states loudly when it is overriding.
+
+Two cautions. 66 reals makes the false-positive column coarse (9.1% is six images).
+And both classes must be measured through the *same* pipeline: an earlier version of
+this table scored reals as full-resolution JPEGs and fakes as 224-crop PNGs, which
+understated detection at -3.00 by 18 points.
+
 ## Limits worth repeating to anyone who uses this
 
 - Trained on GenImage; calibrated on one held-out generator. Transfer to an

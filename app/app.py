@@ -55,7 +55,8 @@ from ledd.models.attention import set_attention_recording  # noqa: E402
 STATE = {}
 
 
-def load_bundle(path: str, device: str = "cpu", max_tiles: int = 16):
+def load_bundle(path: str, device: str = "cpu", max_tiles: int = 16,
+                threshold: float | None = None):
     b = torch.load(path, map_location="cpu", weights_only=False)
     if b.get("format") != "ledd-bundle-v1":
         raise ValueError(f"{path} is not a LEDD export bundle; run scripts/export_model.py")
@@ -66,8 +67,17 @@ def load_bundle(path: str, device: str = "cpu", max_tiles: int = 16):
     # attention tensor of the last block. Without this the attention panel would be
     # silently all-zero, which on this of all projects would be the wrong bug to ship.
     set_attention_recording(model, store_attn=True, store_grad=False)
+    # The bundle's threshold (-7.52) maximises F1 on a 50/50 ADM split of 224-crop PNGs.
+    # On arbitrary uploads -- full-resolution JPEGs, different crop positions, platform
+    # resampling -- real photographs shift several logits toward "fake" and that cutoff
+    # flags 53% of them. Measured on 66 real photographs and 120 full-resolution SDXL
+    # generations, both tiled: -3.0 gives 9% false positives at 90% detection, -2.0 gives
+    # 4.5% at 77.5%. Same weights, same ranking, different point on the ROC; AUC is
+    # unaffected. The paper's number stays in the bundle, overrides are explicit.
     STATE.update(
-        model=model, device=device, threshold=float(b["threshold"]),
+        model=model, device=device,
+        threshold=float(b["threshold"] if threshold is None else threshold),
+        paper_threshold=float(b["threshold"]),
         n_bands=int(b["meta"]["n_bands"]), size=int(b["meta"]["image_size"]),
         meta=b["meta"], max_tiles=max_tiles,
     )
@@ -251,6 +261,13 @@ def build_ui():
                 crop_view = gr.Image(label="What the model actually sees (every crop, native scale)",
                                      height=240)
             with gr.Column(scale=2):
+                if abs(STATE["threshold"] - STATE["paper_threshold"]) > 1e-9:
+                    gr.Markdown(
+                        f"*Threshold {STATE['threshold']:+.2f}, overriding the paper's "
+                        f"{STATE['paper_threshold']:+.2f}. The paper value maximises F1 on a "
+                        f"balanced benchmark split and flags roughly half of ordinary "
+                        f"photographs; this one trades detection for far fewer false alarms. "
+                        f"Table I's figures use the paper value.*")
                 verdict = gr.Markdown()
                 chart = gr.Image(label="Band attribution", height=420)
                 table = gr.Dataframe(
@@ -270,9 +287,16 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=7860)
     ap.add_argument("--max-tiles", type=int, default=16,
                     help="cap on crops per image; 16 is ~1s on CPU")
+    ap.add_argument("--threshold", type=float, default=None,
+                    help="override the bundle's F1-calibrated threshold. -3.0 is a "
+                         "measured demo operating point: 9%% false positives on real "
+                         "photographs at 90%% detection on SDXL. The bundle default "
+                         "(-7.52) flags 53%% of real photographs.")
     a = ap.parse_args()
 
-    load_bundle(a.bundle, a.device, a.max_tiles)
+    load_bundle(a.bundle, a.device, a.max_tiles, a.threshold)
     print(f"loaded {a.bundle} on {a.device}: "
-          f"{STATE['meta']['n_params_deployed']:,} params, threshold {STATE['threshold']:+.4f}")
+          f"{STATE['meta']['n_params_deployed']:,} params, threshold {STATE['threshold']:+.4f}"
+          + ("" if a.threshold is None
+             else f" (OVERRIDE; paper value {STATE['paper_threshold']:+.4f})"))
     build_ui().launch(server_port=a.port, share=a.share)
