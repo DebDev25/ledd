@@ -55,6 +55,19 @@ reads as authoritative whether or not it has earned it, so it is left out until
 the deletion confound (constant-fill masking creates unnaturally smooth patches
 that a synthetic-image detector reacts to) is resolved.
 
+## What this detector does not detect
+
+Tested informally on images from **GPT-image**, generated pictures scored -3.8 and
+-5.8 -- inside the measured real-photograph range (5th-95th percentile -8.8 to -2.1).
+Both read as real. Two images is not a measurement, but it is enough to state the
+limit plainly: this model was trained on GenImage (SD 1.4/1.5, Wukong, VQDM, BigGAN,
+GLIDE, ADM, Midjourney) and validated on SDXL and PixArt-Sigma. Generators outside
+those lineages are not covered by any evidence here, and the app says so.
+
+No threshold fixes this. The scores overlap the real distribution, so a cut that
+catches them flags most real photographs too -- which is exactly the cross-generator
+generalisation problem the paper is about, seen from the deployment end.
+
 ## Choosing a threshold
 
 The bundle carries **T = -7.52**, fitted to maximise F1 on a 50/50 ADM split of

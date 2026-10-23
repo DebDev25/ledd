@@ -305,21 +305,27 @@ def analyse(img: Image.Image):
         hi = min(q["95"] for q in rel) if rel else T
         if logit < min(lo, hi):
             headline = "PROBABLY A REAL PHOTO"
-            plain = ("It scores below the range where generated images start to appear. "
+            plain = ("It scores below the range where SDXL images appear. "
                      f"Of the {refs['populations']['real photographs']['n']} real photographs "
                      f"we measured, about {100 - ranks['real photographs']:.0f}% scored "
                      "higher than this one.")
         elif logit > max(lo, hi):
             headline = "PROBABLY AI-GENERATED"
             plain = ("It scores above almost every real photograph we measured, in the "
-                     "range typical of an image generator.")
+                     "range typical of SDXL.")
         else:
             headline = "TOO CLOSE TO CALL"
             plain = ("Its score lands in the band where real photographs and generated "
                      "images overlap. This model cannot separate the two here, and a "
                      "confident answer would be guesswork.")
-        plain += (" This is a leaning, not a verdict - the model was trained on one "
-                  "benchmark and image generators it has never seen may score anywhere.")
+        plain += (
+            " **This is a leaning, not a verdict, and it is only meaningful for generators "
+            "resembling the ones measured.** The reference range above is SDXL. On "
+            "generators from other lineages - including recent commercial ones such as "
+            "GPT-image - generated pictures score inside the real-photograph range, so a "
+            "'real' reading here is weak evidence at best. The paper reports 0.975 AUC on "
+            "Midjourney and 0.983 on SDXL; it makes no claim about generators outside "
+            "that evidence, and neither does this app.")
     else:
         headline = "LIKELY GENERATED" if is_fake else "LIKELY REAL"
         plain = ""
@@ -338,9 +344,10 @@ def analyse(img: Image.Image):
     md = (
         f"### {headline}\n\n"
         f"{plain}\n\n"
-        f"- Score **{score:.3f}** (0.5 = the decision threshold). Mean logit {logit:+.3f} "
-        f"against threshold {T:+.3f}; raw sigmoid would read {p_raw:.4f}, which is why this "
-        f"app does not show it.\n"
+        f"- Mean score **{logit:+.3f}** over the crops (higher = more generator-like). "
+        f"The paper's threshold is {T:+.3f}, calibrated for a balanced benchmark split; "
+        f"this app does not use it to decide, because on arbitrary uploads no single "
+        f"cut separates the populations.\n"
         f"- Read from **{len(crops)} crop{'s' if len(crops) != 1 else ''}** of "
         f"{STATE['size']}px at native scale covering **{coverage:.0f}%** of the image, "
         f"per-crop logits {per_crop.min():+.2f} to {per_crop.max():+.2f} "
