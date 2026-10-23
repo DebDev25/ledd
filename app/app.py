@@ -97,15 +97,22 @@ def analyse(img: Image.Image):
     logit = float(out["logit"].item())
     p_fake = float(torch.sigmoid(out["logit"]).item())
     is_fake = logit >= T
-    conf0 = p_fake if is_fake else 1.0 - p_fake
 
     # ---- causal band attribution: zero one band at a time
+    #
+    # Measured in LOGIT space, not probability. On a confident image the sigmoid is
+    # saturated -- P(real) sits at ~1.0, so deleting a band moves it by less than float
+    # precision and every bar underflows to exactly 0.0. The logit has no ceiling, so it
+    # still shows which bands carry evidence even when the decision is not in doubt.
+    # Sign is oriented toward the predicted class, so positive always means
+    # "deleting this band cost the model evidence for what it decided".
+    sign = 1.0 if is_fake else -1.0
     drops = []
     for k in range(n):
         m = torch.ones(1, n, device=dev)
         m[0, k] = 0.0
-        p = float(torch.sigmoid(model(x, band_mask=m)["logit"]).item())
-        drops.append(conf0 - (p if is_fake else 1.0 - p))
+        lk = float(model(x, band_mask=m)["logit"].item())
+        drops.append(sign * (logit - lk))
 
     # ---- attention, for contrast only
     raw_att = out.get("band_attention")
@@ -115,9 +122,9 @@ def analyse(img: Image.Image):
     labels = band_labels(n)
     fig, ax = plt.subplots(2, 1, figsize=(9, 5.4), sharex=True)
     ax[0].bar(labels, drops, color=["#c0392b" if d > 0 else "#7f8c8d" for d in drops])
-    ax[0].set_title("Causal: confidence lost when this band is deleted  (this is the explanation)",
+    ax[0].set_title("Causal: evidence lost when this band is deleted  (this is the explanation)",
                     fontsize=10, loc="left")
-    ax[0].set_ylabel("confidence drop")
+    ax[0].set_ylabel("logit drop")
     ax[0].axhline(0, lw=0.8, color="k")
     ax[1].bar(labels, att, color="#34495e")
     ax[1].set_title(
@@ -135,15 +142,27 @@ def analyse(img: Image.Image):
 
     verdict = "LIKELY GENERATED" if is_fake else "LIKELY REAL"
     top = int(np.argmax(drops))
+    span = float(np.max(np.abs(drops)))
     md = (
         f"### {verdict}\n\n"
         f"- P(generated) = **{p_fake:.3f}**  (logit {logit:+.3f}, "
         f"decision threshold {T:+.3f})\n"
-        f"- Most influential band: **{labels[top]}** - deleting it costs "
-        f"{drops[top]:.3f} confidence\n"
+        f"- Largest causal band: **{labels[top]}**, worth {drops[top]:+.3f} logits "
+        f"out of {abs(logit - T):.2f} above threshold\n"
         f"- Band 0 always reads ~0: the DC component and lowest ring are zeroed "
         f"inside the model, since they carry image content rather than generator artifacts.\n"
     )
+    if span < 0.05:
+        md += (
+            "\n> **No frequency band meaningfully changes this decision** "
+            f"(largest effect {span:.3f} logits). That is not a bug and not a shrug: it is "
+            "this paper's result. In the reported concatenation model the frequency stream "
+            "contributes 0.003 AUC at inference, and no band costs more than 0.003. The "
+            "stream earns its place during *training* (+0.0146 AUC, 3.7 sigma over three "
+            "seeds), not at prediction time. The band attribution that does show structure — "
+            "band 11 worth 0.270 AUC — belongs to the standalone frequency stream, a "
+            "different model.\n"
+        )
     if upscaled:
         md += ("\n> This image was smaller than "
                f"{STATE['size']}px and had to be upscaled. Resampling imprints its own "
